@@ -1,142 +1,177 @@
-import javax.swing.*;
-import javax.sound.sampled.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.io.File;
-import java.io.IOException;
 import java.util.Random;
 import java.util.Stack;
 import java.util.prefs.Preferences;
+import javax.sound.sampled.*;
+import javax.swing.*;
 
-public class Enhanced2048{
+public class Enhanced2048 {
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> new EntryWindow());
     }
-    // -------- Entry Window with Image, Music, and Centered Start Button --------
+
+    // Entry Page with background image, music, best score, Start and Reset buttons
     static class EntryWindow extends JFrame {
-        Clip introMusic;
+        private Clip introMusic;
+        private JLabel bestScoreLabel;
+        private Preferences prefs = Preferences.userRoot().node(this.getClass().getName());
+
         public EntryWindow() {
-            setTitle("2048 Cubes.io");
-            setUndecorated(true);
-            setResizable(false);
+            setTitle("2048 Cubes.io - Entry");
             setDefaultCloseOperation(EXIT_ON_CLOSE);
+            setUndecorated(true);
             setExtendedState(JFrame.MAXIMIZED_BOTH);
             setLayout(new BorderLayout());
 
-            // Custom panel with image background
-            JPanel imagePanel = new JPanel() {
+            // Background panel paints image
+            JPanel backgroundPanel = new JPanel() {
                 protected void paintComponent(Graphics g) {
                     super.paintComponent(g);
-                    try {
-                        Image img = new ImageIcon("entry_image.png").getImage();
-                        g.drawImage(img, 0, 0, getWidth(), getHeight(), this);
-                    } catch (Exception e) {
-                        setBackground(Color.CYAN);
-                    }
+                    Image img = new ImageIcon("entry_image.png").getImage();
+                    g.drawImage(img, 0, 0, getWidth(), getHeight(), this);
                 }
             };
-            imagePanel.setLayout(new GridBagLayout());
+            backgroundPanel.setLayout(new GridBagLayout());
+
+            // Best score from preferences
+            int bestScore = prefs.getInt("bestScore", 0);
+            bestScoreLabel = new JLabel("Best Score: " + bestScore);
+            bestScoreLabel.setFont(new Font("Arial Rounded MT Bold", Font.BOLD, 40));
+            bestScoreLabel.setForeground(Color.WHITE);
+
             JButton startButton = new JButton("Start Game");
-            startButton.setFont(new Font("Comic Sans MS", Font.BOLD, 36));
-            startButton.setBackground(new Color(0xF7CA18)); // Yellow style
+            startButton.setFont(new Font("Comic Sans MS", Font.BOLD, 48));
+            startButton.setBackground(new Color(0x1abc9c));
             startButton.setForeground(Color.WHITE);
             startButton.setFocusPainted(false);
-            startButton.setBorder(BorderFactory.createEmptyBorder(20, 80, 20, 80));
-            // Center button using GridBag
+            startButton.setPreferredSize(new Dimension(280, 80));
+
+            JButton resetBestButton = new JButton("Reset Best Score");
+            resetBestButton.setFont(new Font("Comic Sans MS", Font.BOLD, 30));
+            resetBestButton.setBackground(new Color(0xe74c3c));
+            resetBestButton.setForeground(Color.WHITE);
+            resetBestButton.setFocusPainted(false);
+            resetBestButton.setPreferredSize(new Dimension(280, 60));
+
             GridBagConstraints gbc = new GridBagConstraints();
-            gbc.gridx = 0; gbc.gridy = 0; gbc.anchor = GridBagConstraints.CENTER;
-            imagePanel.add(startButton, gbc);
-            add(imagePanel, BorderLayout.CENTER);
+            gbc.insets = new Insets(20, 20, 20, 20);
+            gbc.gridx = 0; gbc.gridy = 0; backgroundPanel.add(bestScoreLabel, gbc);
+            gbc.gridy = 1; backgroundPanel.add(startButton, gbc);
+            gbc.gridy = 2; backgroundPanel.add(resetBestButton, gbc);
 
-            pack();
-            setVisible(true);
+            add(backgroundPanel, BorderLayout.CENTER);
 
-            // Play intro music (replace path if needed)
             try {
-                introMusic = playMusic("intro.wav", true);
+                introMusic = playMusic("into_music.wav", true);
+                if (introMusic == null) System.out.println("Intro music failed to load.");
             } catch (Exception ex) {
+                ex.printStackTrace();
                 introMusic = null;
             }
 
             startButton.addActionListener(e -> {
                 if (introMusic != null) introMusic.stop();
                 dispose();
-                new GameWindow();
+                new GameWindow(prefs, bestScoreLabel);
             });
+
+            resetBestButton.addActionListener(e -> {
+                prefs.putInt("bestScore", 0);
+                bestScoreLabel.setText("Best Score: 0");
+            });
+
+            setVisible(true);
         }
     }
 
-    // --------- Main Full-Screen Game Window with Color, Sounds, Styling --------
+    // Game Window with 4x4 grid, scoring, sounds, and gameplay
     static class GameWindow extends JFrame {
         private static final int SIZE = 4;
         private int[][] grid = new int[SIZE][SIZE];
         private JLabel[][] gridLabels = new JLabel[SIZE][SIZE];
         private JLabel scoreLabel, bestScoreLabel;
-        private int score = 0, bestScore = 0;
+        private int score = 0, bestScore;
         private boolean winReached = false;
         private Stack<int[][]> undoGridStack = new Stack<>();
         private Stack<Integer> undoScoreStack = new Stack<>();
-        private Preferences prefs = Preferences.userRoot().node(this.getClass().getName());
+        private Preferences prefs;
         private Clip moveSound, bgMusic;
+        private JLabel externalBestScoreLabel; // To update on Entry page
 
-        public GameWindow() {
-            setTitle("2048 Cubes.io");
+        public GameWindow(Preferences prefs, JLabel bestScoreLabel) {
+            this.prefs = prefs;
+            this.externalBestScoreLabel = bestScoreLabel;
+            this.bestScore = prefs.getInt("bestScore", 0);
+
+            setTitle("2048 Cubes.io - Game");
             setUndecorated(true);
             setDefaultCloseOperation(EXIT_ON_CLOSE);
             GraphicsDevice gd = GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice();
             gd.setFullScreenWindow(this);
 
-            bestScore = prefs.getInt("bestScore", 0);
             setLayout(new BorderLayout(8, 8));
             getContentPane().setBackground(new Color(0x238BD3));
 
-            // Top panel: Score
-            JPanel topPanel = new JPanel(new GridLayout(1, 2, 16, 10));
+            // Top panel: score and best score
+            JPanel topPanel = new JPanel(new GridLayout(1, 2, 20, 10));
             topPanel.setBackground(getContentPane().getBackground());
-            scoreLabel = styledLabel("Score: 0", 34, Color.WHITE, Color.DARK_GRAY);
-            bestScoreLabel = styledLabel("Best: " + bestScore, 34, Color.WHITE, Color.DARK_GRAY);
-            topPanel.add(scoreLabel); topPanel.add(bestScoreLabel);
+            scoreLabel = styledLabel("Score: 0", 32, Color.WHITE, Color.DARK_GRAY);
+            bestScoreLabel = styledLabel("Best: " + bestScore, 32, Color.WHITE, Color.DARK_GRAY);
+            topPanel.add(scoreLabel);
+            topPanel.add(bestScoreLabel);
             add(topPanel, BorderLayout.NORTH);
 
-            // Center: Game grid
-            JPanel gridPanel = new JPanel(new GridLayout(SIZE, SIZE, 16, 16));
+            // Center: grid panel
+            JPanel gridPanel = new JPanel(new GridLayout(SIZE, SIZE, 15, 15));
             gridPanel.setBackground(new Color(0x238BD3));
-            for (int i = 0; i < SIZE; i++) for (int j = 0; j < SIZE; j++) {
-                gridLabels[i][j] = styledLabel("", 54, Color.BLACK, new Color(0xcdc1b4));
-                gridLabels[i][j].setOpaque(true);
-                gridLabels[i][j].setHorizontalAlignment(SwingConstants.CENTER);
-                gridLabels[i][j].setBorder(BorderFactory.createLineBorder(Color.WHITE, 5));
-                gridPanel.add(gridLabels[i][j]);
+            for(int i=0; i<SIZE; i++) {
+                for(int j=0; j<SIZE; j++) {
+                    gridLabels[i][j] = styledLabel("", 48, Color.BLACK, new Color(0xcdc1b4));
+                    gridLabels[i][j].setOpaque(true);
+                    gridLabels[i][j].setHorizontalAlignment(SwingConstants.CENTER);
+                    gridLabels[i][j].setBorder(BorderFactory.createLineBorder(Color.WHITE, 5));
+                    gridPanel.add(gridLabels[i][j]);
+                }
             }
             add(gridPanel, BorderLayout.CENTER);
 
-            // Bottom panel: Controls
-            JPanel controls = new JPanel();
-            controls.setBackground(getContentPane().getBackground());
-            JButton undo = styledButton("Undo", 28); 
-            JButton restart = styledButton("Restart", 28); 
-            JButton exit = styledButton("Exit", 28);
-            controls.add(undo); controls.add(restart); controls.add(exit);
-            add(controls, BorderLayout.SOUTH);
+            // Bottom panel with Undo, Restart, Exit
+            JPanel bottomPanel = new JPanel();
+            bottomPanel.setBackground(getContentPane().getBackground());
+            JButton undoButton = styledButton("Undo", 28);
+            JButton restartButton = styledButton("Restart", 28);
+            JButton exitButton = styledButton("Exit", 28);
+            bottomPanel.add(undoButton);
+            bottomPanel.add(restartButton);
+            bottomPanel.add(exitButton);
+            add(bottomPanel, BorderLayout.SOUTH);
 
-            undo.addActionListener(e -> undo());
-            restart.addActionListener(e -> restart());
-            exit.addActionListener(e -> exitGame());
+            undoButton.addActionListener(e -> undo());
+            restartButton.addActionListener(e -> {
+                int res = JOptionPane.showConfirmDialog(this, "Restart game?", "Confirm Restart", JOptionPane.YES_NO_OPTION);
+                if(res == JOptionPane.YES_OPTION) initGame();
+            });
+            exitButton.addActionListener(e -> {
+                int res = JOptionPane.showConfirmDialog(this, "Exit game?", "Confirm Exit", JOptionPane.YES_NO_OPTION);
+                if(res == JOptionPane.YES_OPTION){
+                    if(bgMusic != null) bgMusic.stop();
+                    System.exit(0);
+                }
+            });
 
-            // Key listener for arrow keys
             addKeyListener(new KeyAdapter() {
                 public void keyPressed(KeyEvent e) {
-                    if (winReached) return;
-                    int key = e.getKeyCode();
+                    if(winReached) return;
                     boolean moved = false;
-                    switch (key) {
+                    switch(e.getKeyCode()) {
                         case KeyEvent.VK_UP: moved = moveUp(); break;
                         case KeyEvent.VK_DOWN: moved = moveDown(); break;
                         case KeyEvent.VK_LEFT: moved = moveLeft(); break;
                         case KeyEvent.VK_RIGHT: moved = moveRight(); break;
-                        case KeyEvent.VK_ESCAPE: exitGame();
                     }
-                    if (moved) {
+                    if(moved) {
                         playSound(moveSound);
                         addNewTile();
                         updateGrid();
@@ -145,219 +180,438 @@ public class Enhanced2048{
                     }
                 }
             });
+
             setFocusable(true);
 
-            // Load sounds/music
-            moveSound = loadSound("move.wav");
-            bgMusic = loadSound("background.wav");
+            moveSound = loadSound("move_sound.wav");
+            bgMusic = loadSound("background_music.wav");
             if(bgMusic != null) bgMusic.loop(Clip.LOOP_CONTINUOUSLY);
 
-            // Setup and show
             initGame();
             setVisible(true);
         }
 
-        private JLabel styledLabel(String txt, int size, Color fg, Color bg) {
-            JLabel l = new JLabel(txt, JLabel.CENTER);
-            l.setFont(new Font("Arial", Font.BOLD, size));
-            l.setOpaque(true);
-            l.setForeground(fg); l.setBackground(bg);
-            return l;
+        private JLabel styledLabel(String text, int size, Color fg, Color bg) {
+            JLabel label = new JLabel(text, SwingConstants.CENTER);
+            label.setFont(new Font("Arial", Font.BOLD, size));
+            label.setOpaque(true);
+            label.setForeground(fg);
+            label.setBackground(bg);
+            return label;
         }
-        private JButton styledButton(String txt, int size) {
-            JButton b = new JButton(txt);
-            b.setFont(new Font("Comic Sans MS", Font.BOLD, size));
-            b.setFocusPainted(false);
-            b.setBackground(new Color(0xC0392B));
-            b.setForeground(Color.WHITE);
-            return b;
+
+        private JButton styledButton(String text, int size) {
+            JButton button = new JButton(text);
+            button.setFont(new Font("Comic Sans MS", Font.BOLD, size));
+            button.setFocusable(false);
+            button.setBackground(new Color(0xC0392B));
+            button.setForeground(Color.WHITE);
+            return button;
         }
+
         private void initGame() {
-            score = 0; winReached = false;
-            undoGridStack.clear(); undoScoreStack.clear();
-            for (int i = 0; i < SIZE; i++) for (int j = 0; j < SIZE; j++) grid[i][j] = 0;
-            addNewTile(); addNewTile();
-            updateGrid(); updateScore();
+            score = 0;
+            winReached = false;
+            undoGridStack.clear();
+            undoScoreStack.clear();
+
+            for(int i=0; i<SIZE; i++) for(int j=0; j<SIZE; j++) grid[i][j] = 0;
+            addNewTile();
+            addNewTile();
+
+            updateGrid();
+            updateScore();
         }
+
         private void updateGrid() {
-            for (int i = 0; i < SIZE; i++) for (int j = 0; j < SIZE; j++) {
-                int val = grid[i][j];
-                gridLabels[i][j].setText(val == 0 ? "" : String.valueOf(val));
-                gridLabels[i][j].setBackground(getBoxColor(val));
-                gridLabels[i][j].setForeground(val < 16 ? Color.DARK_GRAY : Color.WHITE);
+            for(int i=0; i<SIZE; i++) {
+                for(int j=0; j<SIZE; j++) {
+                    int val = grid[i][j];
+                    gridLabels[i][j].setText(val == 0 ? "" : String.valueOf(val));
+                    gridLabels[i][j].setBackground(getBoxColor(val));
+                    gridLabels[i][j].setForeground(val < 16 ? Color.DARK_GRAY : Color.WHITE);
+                }
             }
         }
+
         private void updateScore() {
             scoreLabel.setText("Score: " + score);
-            if (score > bestScore) {
+            if(score > bestScore) {
                 bestScore = score;
                 prefs.putInt("bestScore", bestScore);
+                bestScoreLabel.setText("Best: " + bestScore);
+                externalBestScoreLabel.setText("Best Score: " + bestScore);
             }
-            bestScoreLabel.setText("Best: " + bestScore);
         }
-        // --------- Movement, Undo, Game Logic ----------
+
+        // Tracks previous states for Undo
         private void saveState() {
-            int[][] copyGrid = new int[SIZE][SIZE];
-            for (int i = 0; i < SIZE; i++) System.arraycopy(grid[i], 0, copyGrid[i], 0, SIZE);
-            undoGridStack.push(copyGrid); undoScoreStack.push(score);
+            int[][] copy = new int[SIZE][SIZE];
+            for(int i=0; i<SIZE; i++) System.arraycopy(grid[i], 0, copy[i], 0, SIZE);
+            undoGridStack.push(copy);
+            undoScoreStack.push(score);
         }
+
         private void undo() {
-            if (!undoGridStack.isEmpty() && !undoScoreStack.isEmpty()) {
-                grid = undoGridStack.pop(); score = undoScoreStack.pop();
-                winReached = false; updateGrid(); updateScore();
+            if(!undoGridStack.isEmpty() && !undoScoreStack.isEmpty()) {
+                grid = undoGridStack.pop();
+                score = undoScoreStack.pop();
+                winReached = false;
+                updateGrid();
+                updateScore();
             } else {
-                infoMessage("No move to undo!", "Undo");
+                JOptionPane.showMessageDialog(this, "No moves to undo.", "Undo", JOptionPane.INFORMATION_MESSAGE);
             }
         }
-        private void restart() {
-            int option = confirmMessage("Restart the game?", "Restart");
-            if(option == JOptionPane.YES_OPTION) initGame();
-        }
-        private void exitGame() {
-            int option = confirmMessage("Are you sure you want to exit?", "Exit");
-            if(option == JOptionPane.YES_OPTION) { if(bgMusic!=null) bgMusic.stop(); System.exit(0);}
-        }
+
         private boolean addNewTile() {
-            if (isGridFull()) return false;
-            Random r = new Random(); int x, y;
-            do { x = r.nextInt(SIZE); y = r.nextInt(SIZE); } while (grid[x][y] != 0);
-            grid[x][y] = r.nextInt(10) == 0 ? 4 : 2;
+            if(isGridFull()) return false;
+            Random rnd = new Random();
+            int x, y;
+            do {
+                x = rnd.nextInt(SIZE);
+                y = rnd.nextInt(SIZE);
+            } while(grid[x][y] != 0);
+            grid[x][y] = rnd.nextInt(10) == 0 ? 4 : 2;
             return true;
         }
+
         private boolean isGridFull() {
-            for (int[] row : grid) for (int val : row) if (val == 0) return false;
+            for(int[] row : grid) for(int val : row) if(val == 0) return false;
             return true;
         }
-        private boolean moveUp() { return moveTiles(0,-1); }
-        private boolean moveDown() { return moveTiles(0,1); }
-        private boolean moveLeft() { return moveTiles(-1,0); }
-        private boolean moveRight() { return moveTiles(1,0); }
-        // Main move logic with dx, dy
-        private boolean moveTiles(int dx, int dy) {
+
+        // Movement methods, with iteration order adapted for direction
+        private boolean moveUp() {
             saveState();
             boolean moved = false;
-            for(int i=0; i<SIZE; i++) for(int j=0; j<SIZE; j++) {
-                int x = dx==0?j:i, y = dy==0?j:i;
-                if(grid[x][y]!=0) {
-                    int nx = x, ny = y;
-                    while(true) {
-                        int tx = nx+dx, ty = ny+dy;
-                        if(tx<0||tx>=SIZE||ty<0||ty>=SIZE) break;
-                        if(grid[tx][ty]==0) {
-                            grid[tx][ty]=grid[nx][ny]; grid[nx][ny]=0;
-                            nx=tx; ny=ty; moved=true;
-                        } else if(grid[tx][ty]==grid[nx][ny]) {
-                            grid[tx][ty]*=2; score+=grid[tx][ty]; grid[nx][ny]=0;
-                            if(grid[tx][ty]==2048) winReached=true; moved=true; break;
-                        } else break;
+            for(int col=0; col < SIZE; col++) {
+                for(int row=1; row < SIZE; row++) {
+                    if(grid[row][col] != 0) {
+                        int r = row;
+                        while(r > 0 && grid[r-1][col] == 0) {
+                            grid[r-1][col] = grid[r][col];
+                            grid[r][col] = 0;
+                            r--;
+                            moved = true;
+                        }
+                        if(r > 0 && grid[r-1][col] == grid[r][col]) {
+                            grid[r-1][col] *= 2;
+                            score += grid[r-1][col];
+                            grid[r][col] = 0;
+                            moved = true;
+                            if(grid[r-1][col] == 2048) winReached = true;
+                        }
                     }
                 }
             }
             return moved;
         }
+
+        private boolean moveDown() {
+            saveState();
+            boolean moved = false;
+            for(int col=0; col < SIZE; col++) {
+                for(int row=SIZE-2; row >= 0; row--) {
+                    if(grid[row][col] != 0) {
+                        int r = row;
+                        while(r < SIZE-1 && grid[r+1][col] == 0) {
+                            grid[r+1][col] = grid[r][col];
+                            grid[r][col] = 0;
+                            r++;
+                            moved = true;
+                        }
+                        if(r < SIZE-1 && grid[r+1][col] == grid[r][col]) {
+                            grid[r+1][col] *= 2;
+                            score += grid[r+1][col];
+                            grid[r][col] = 0;
+                            moved = true;
+                            if(grid[r+1][col] == 2048) winReached = true;
+                        }
+                    }
+                }
+            }
+            return moved;
+        }
+
+        private boolean moveLeft() {
+            saveState();
+            boolean moved = false;
+            for(int row=0; row < SIZE; row++) {
+                for(int col=1; col < SIZE; col++) {
+                    if(grid[row][col] != 0) {
+                        int c = col;
+                        while(c > 0 && grid[row][c-1] == 0) {
+                            grid[row][c-1] = grid[row][c];
+                            grid[row][c] = 0;
+                            c--;
+                            moved = true;
+                        }
+                        if(c > 0 && grid[row][c-1] == grid[row][c]) {
+                            grid[row][c-1] *= 2;
+                            score += grid[row][c-1];
+                            grid[row][c] = 0;
+                            moved = true;
+                            if(grid[row][c-1] == 2048) winReached = true;
+                        }
+                    }
+                }
+            }
+            return moved;
+        }
+
+        private boolean moveRight() {
+            saveState();
+            boolean moved = false;
+            for(int row=0; row < SIZE; row++) {
+                for(int col=SIZE-2; col >= 0; col--) {
+                    if(grid[row][col] != 0) {
+                        int c = col;
+                        while(c < SIZE-1 && grid[row][c+1] == 0) {
+                            grid[row][c+1] = grid[row][c];
+                            grid[row][c] = 0;
+                            c++;
+                            moved = true;
+                        }
+                        if(c < SIZE-1 && grid[row][c+1] == grid[row][c]) {
+                            grid[row][c+1] *= 2;
+                            score += grid[row][c+1];
+                            grid[row][c] = 0;
+                            moved = true;
+                            if(grid[row][c+1] == 2048) winReached = true;
+                        }
+                    }
+                }
+            }
+            return moved;
+        }
+
         private void checkGameStatus() {
             if(winReached) {
-                if(bgMusic!=null) bgMusic.stop();
-                new StyledWinPage(score, this);
-                winReached=false;
+                if(bgMusic != null) bgMusic.stop();
+                new StyledWinPage(score, this, prefs, externalBestScoreLabel);
+                winReached = false;
             } else if(isGameOver()) {
-                if(bgMusic!=null) bgMusic.stop();
-                new StyledLosePage(score, this);
+                if(bgMusic != null) bgMusic.stop();
+                new StyledLosePage(score, this, prefs, externalBestScoreLabel);
             }
         }
+
         private boolean isGameOver() {
-            if (!isGridFull()) return false;
-            for (int i = 0; i < SIZE; i++) for (int j = 0; j < SIZE-1; j++)
-                if (grid[i][j]==grid[i][j+1]||grid[j][i]==grid[j+1][i]) return false;
+            if(!isGridFull()) return false;
+            for(int row=0; row < SIZE; row++) {
+                for(int col=0; col < SIZE-1; col++) {
+                    if(grid[row][col] == grid[row][col+1]) return false;
+                }
+            }
+            for(int col=0; col < SIZE; col++) {
+                for(int row=0; row < SIZE-1; row++) {
+                    if(grid[row][col] == grid[row+1][col]) return false;
+                }
+            }
             return true;
         }
-        // --------- Utility Styling + Audio Helpers ----------
+
         private Color getBoxColor(int value) {
             switch(value) {
-                case 0: return new Color(0xcdc1b4);
-                case 2: return new Color(0xeee4da);
-                case 4: return new Color(0xede0c8);
-                case 8: return new Color(0xf2b179);
-                case 16: return new Color(0xf59563);
-                case 32: return new Color(0xf67c5f);
-                case 64: return new Color(0xf65e3b);
-                case 128: return new Color(0xedcf72);
+                case 0: return new Color(0xE8CF15);
+                case 2: return new Color(0x1699F8);
+                case 4: return new Color(0x683085);
+                case 8: return new Color(0xE51C0B);
+                case 16: return new Color(0x7D2910);
+                case 32: return new Color(0x107D29);
+                case 64: return new Color(0x066612);
+                case 128: return new Color(0x8779C7);
                 case 256: return new Color(0xedcc61);
                 case 512: return new Color(0xedc850);
-                case 1024:return new Color(0xedc53f);
-                case 2048:return new Color(0xedc22e);
+                case 1024: return new Color(0xedc53f);
+                case 2048: return new Color(0xedc22e);
                 default: return new Color(0x3c3a32);
             }
         }
-        private void infoMessage(String msg, String title) {
-            JOptionPane.showMessageDialog(this, msg, title, JOptionPane.INFORMATION_MESSAGE);
-        }
-        private int confirmMessage(String msg, String title) {
-            return JOptionPane.showConfirmDialog(this, msg, title, JOptionPane.YES_NO_OPTION);
-        }
     }
-    // --------- Win/Lose Fullscreen Pages Built with Styling and Music ---------
+
     static class StyledWinPage extends JFrame {
-        public StyledWinPage(int score, GameWindow parent) {
+        Clip winMusic;
+        Preferences prefs;
+        JLabel externalBestScoreLabel;
+        GameWindow parent;
+
+        public StyledWinPage(int score, GameWindow parent, Preferences prefs, JLabel externalBestScoreLabel) {
             super("You Won!");
-            buildScreen(score, parent, "You reached 2048!", true);
-        }
-    }
-    static class StyledLosePage extends JFrame {
-        public StyledLosePage(int score, GameWindow parent) {
-            super("Game Over");
-            buildScreen(score, parent, "No more moves!", false);
-        }
-        private void buildScreen(int score, GameWindow parent, String msg, boolean win) {
+            this.parent = parent;
+            this.prefs = prefs;
+            this.externalBestScoreLabel = externalBestScoreLabel;
+
+            if(parent.bgMusic != null) parent.bgMusic.stop();
+
+            try {
+                winMusic = loadSound("win.wav");
+                if(winMusic != null) winMusic.loop(Clip.LOOP_CONTINUOUSLY);
+            } catch(Exception e) {
+                winMusic = null;
+            }
+
             setUndecorated(true);
             setExtendedState(JFrame.MAXIMIZED_BOTH);
-            getContentPane().setBackground(win ? new Color(0x1abc9c) : new Color(0xe74c3c));
-            setLayout(new GridBagLayout());
-            GridBagConstraints gc = new GridBagConstraints();
-            gc.gridx=0; gc.anchor=GridBagConstraints.CENTER; gc.insets=new Insets(20,0,20,0);
+            setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
-            JLabel congrats = new JLabel(win ? "Congratulations!" : "Game Over");
+            JLabel background = new JLabel(new ImageIcon("win_image.png"));
+            setContentPane(background);
+            background.setLayout(new GridBagLayout());
+
+            JPanel overlay = new JPanel(new GridBagLayout());
+            overlay.setOpaque(false);
+            GridBagConstraints gc = new GridBagConstraints();
+            gc.gridx = 0;
+            gc.anchor = GridBagConstraints.CENTER;
+            gc.insets = new Insets(20, 0, 20, 0);
+
+            JLabel congrats = new JLabel("Congratulations!");
             congrats.setFont(new Font("Comic Sans MS", Font.BOLD, 80));
             congrats.setForeground(Color.WHITE);
-            gc.gridy=0; add(congrats,gc);
+            gc.gridy = 0;
+            overlay.add(congrats, gc);
 
-            JLabel msgLabel = new JLabel(msg + " Your score: " + score);
+            JLabel msgLabel = new JLabel("You reached 2048! Your score: " + score);
             msgLabel.setFont(new Font("Arial", Font.PLAIN, 48));
             msgLabel.setForeground(Color.WHITE);
-            gc.gridy=1; add(msgLabel,gc);
+            gc.gridy = 1;
+            overlay.add(msgLabel, gc);
 
             JPanel btns = new JPanel();
             btns.setOpaque(false);
-            JButton replay = new JButton("Play Again"), exit = new JButton("Exit");
+            JButton replay = new JButton("Play Again");
+            JButton exit = new JButton("Exit");
             replay.setFont(new Font("Arial", Font.BOLD, 32));
             exit.setFont(new Font("Arial", Font.BOLD, 32));
-            btns.add(replay); btns.add(exit);
-            gc.gridy=2; add(btns,gc);
+            btns.add(replay);
+            btns.add(exit);
+            gc.gridy = 2;
+            overlay.add(btns, gc);
 
-            replay.addActionListener(e -> { dispose(); parent.initGame(); parent.setVisible(true); });
-            exit.addActionListener(e -> System.exit(0));
+            background.add(overlay);
+
+            replay.addActionListener(e -> {
+                if(winMusic != null) winMusic.stop();
+                dispose();
+                parent.initGame();
+                parent.setVisible(true);
+                updateExternalBestScore();
+            });
+            exit.addActionListener(e -> {
+                if(winMusic != null) winMusic.stop();
+                System.exit(0);
+            });
+
             setVisible(true);
+        }
 
-            // Play special SFX for win/lose if wanted
+        private void updateExternalBestScore() {
+            int best = prefs.getInt("bestScore", 0);
+            externalBestScoreLabel.setText("Best Score: " + best);
         }
     }
-    // --------- Audio Helper Methods -----------
+
+    static class StyledLosePage extends JFrame {
+        Clip loseMusic;
+        Preferences prefs;
+        JLabel externalBestScoreLabel;
+        GameWindow parent;
+
+        public StyledLosePage(int score, GameWindow parent, Preferences prefs, JLabel externalBestScoreLabel) {
+            super("Game Over");
+            this.parent = parent;
+            this.prefs = prefs;
+            this.externalBestScoreLabel = externalBestScoreLabel;
+
+            if(parent.bgMusic != null) parent.bgMusic.stop();
+
+            try {
+                loseMusic = loadSound("lost_music.wav");
+                if(loseMusic != null) loseMusic.loop(Clip.LOOP_CONTINUOUSLY);
+            } catch(Exception e) {
+                loseMusic = null;
+            }
+
+            setUndecorated(true);
+            setExtendedState(JFrame.MAXIMIZED_BOTH);
+            setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+            JLabel background = new JLabel(new ImageIcon("lost_image.jpg"));
+            setContentPane(background);
+            background.setLayout(new GridBagLayout());
+
+            JPanel overlay = new JPanel(new GridBagLayout());
+            overlay.setOpaque(false);
+            GridBagConstraints gc = new GridBagConstraints();
+            gc.gridx=0; gc.anchor=GridBagConstraints.CENTER; gc.insets=new Insets(20, 0, 20, 0);
+
+            JLabel gameOver = new JLabel("Game Over");
+            gameOver.setFont(new Font("Comic Sans MS", Font.BOLD, 80));
+            gameOver.setForeground(Color.WHITE);
+            gc.gridy=0; overlay.add(gameOver, gc);
+
+            JLabel msgLabel = new JLabel("No more moves! Your score: " + score);
+            msgLabel.setFont(new Font("Arial", Font.PLAIN, 48));
+            msgLabel.setForeground(Color.WHITE);
+            gc.gridy=1; overlay.add(msgLabel, gc);
+
+            JPanel btns = new JPanel();
+            btns.setOpaque(false);
+            JButton replay = new JButton("Play Again");
+            JButton exit = new JButton("Exit");
+            replay.setFont(new Font("Arial", Font.BOLD, 32));
+            exit.setFont(new Font("Arial", Font.BOLD, 32));
+            btns.add(replay);
+            btns.add(exit);
+            gc.gridy=2; overlay.add(btns, gc);
+
+            background.add(overlay);
+
+            replay.addActionListener(e -> {
+                if(loseMusic != null) loseMusic.stop();
+                dispose();
+                parent.initGame();
+                parent.setVisible(true);
+                updateExternalBestScore();
+            });
+            exit.addActionListener(e -> {
+                if(loseMusic != null) loseMusic.stop();
+                System.exit(0);
+            });
+
+            setVisible(true);
+        }
+
+        private void updateExternalBestScore() {
+            int best = prefs.getInt("bestScore", 0);
+            externalBestScoreLabel.setText("Best Score: " + best);
+        }
+    }
+
+    // Audio helper methods
+
     private static Clip playMusic(String filename, boolean loop) throws Exception {
-        Clip c = loadSound(filename);
-        if (c != null) {
-            c.start();
-            if(loop) c.loop(Clip.LOOP_CONTINUOUSLY);
+        Clip clip = loadSound(filename);
+        if(clip != null) {
+            clip.start();
+            if(loop) clip.loop(Clip.LOOP_CONTINUOUSLY);
         }
-        return c;
+        return clip;
     }
+
     private static Clip loadSound(String filename) {
         try {
             AudioInputStream audioIn = AudioSystem.getAudioInputStream(new File(filename));
             Clip clip = AudioSystem.getClip();
             clip.open(audioIn);
             return clip;
-        } catch(Exception e) { return null; }
+        } catch (Exception e) {
+            System.err.println("Could not load audio file: " + filename);
+            return null;
+        }
     }
+
     private static void playSound(Clip clip) {
         if(clip != null) {
             if(clip.isRunning()) clip.stop();
@@ -366,3 +620,7 @@ public class Enhanced2048{
         }
     }
 }
+
+
+
+
